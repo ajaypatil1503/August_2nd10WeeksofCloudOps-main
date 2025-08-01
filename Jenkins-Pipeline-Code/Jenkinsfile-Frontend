@@ -5,63 +5,73 @@ pipeline {
         nodejs 'nodejs'
     }
     environment  {
-        SCANNER_HOME=tool 'sonar-scanner'
+        SCANNER_HOME = tool 'sonar-scanner'
         AWS_ACCOUNT_ID = credentials('ACCOUNT_ID')
         AWS_ECR_REPO_NAME = credentials('ECR_REPO1')
         AWS_DEFAULT_REGION = 'us-east-1'
-        REPOSITORY_URI = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/"
+        REPOSITORY_URI = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com"
     }
+
     stages {
         stage('Cleaning Workspace') {
             steps {
                 cleanWs()
             }
         }
+
         stage('Checkout from Git') {
             steps {
                 git branch: 'main', url: 'https://github.com/ajaypatil1503/August_2nd10WeeksofCloudOps-main.git'
             }
         }
-        stage('Sonarqube Analysis') {
+
+        stage('SonarQube Analysis') {
             steps {
                 dir('client') {
                     withSonarQubeEnv('sonar-server') {
-                        sh ''' $SCANNER_HOME/bin/sonar-scanner \
-                        -Dsonar.projectName=three-tier-frontend \
-                        -Dsonar.projectKey=three-tier-frontend '''
+                        sh '''
+                            ${SCANNER_HOME}/bin/sonar-scanner \
+                            -Dsonar.projectKey=three-tier-frontend \
+                            -Dsonar.projectName=three-tier-frontend
+                        '''
                     }
                 }
             }
         }
+
         stage('Quality Check') {
             steps {
                 script {
-                    waitForQualityGate abortPipeline: false, credentialsId: 'sonar-token' 
+                    waitForQualityGate abortPipeline: false, credentialsId: 'sonar-token'
                 }
             }
-        }/*
+        }
+
+        /*
         stage('Trivy File Scan') {
             steps {
                 dir('client') {
                     sh 'trivy fs . > trivyfs.txt'
                 }
             }
-        }*/
+        }
+        */
+
         stage("Docker Image Build") {
             steps {
-                script {
-                    dir('client') {
-                            sh 'docker system prune -f'
-                            sh 'docker container prune -f'
-                            sh 'docker build -t ${AWS_ECR_REPO_NAME} .'
-                    }
+                dir('client') {
+                    sh '''
+                        docker system prune -f
+                        docker container prune -f
+                        docker build -t ${AWS_ECR_REPO_NAME} .
+                    '''
                 }
             }
         }
+
         stage("ECR Image Pushing") {
             steps {
-                script {
-                    sh '''
+                sh '''
                     echo "Logging in to ECR..."
                     aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${REPOSITORY_URI}
 
@@ -70,21 +80,25 @@ pipeline {
 
                     echo "Pushing to ECR..."
                     docker push ${REPOSITORY_URI}/${AWS_ECR_REPO_NAME}:${BUILD_NUMBER}
-                    '''
-                }
+                '''
             }
-        }/*
+        }
+
+        /*
         stage("TRIVY Image Scan") {
             steps {
-                sh 'trivy image ${REPOSITORY_URI}${AWS_ECR_REPO_NAME}:${BUILD_NUMBER} > trivyimage.txt' 
+                sh 'trivy image ${REPOSITORY_URI}/${AWS_ECR_REPO_NAME}:${BUILD_NUMBER} > trivyimage.txt'
             }
-        }*/
-        stage('Checkout Code') {
+        }
+        */
+
+        stage('Checkout Code Again') {
             steps {
                 git branch: 'main', url: 'https://github.com/ajaypatil1503/August_2nd10WeeksofCloudOps-main.git'
             }
         }
-        stage('Update Deployment file') {
+
+        stage('Update Deployment File') {
             environment {
                 GIT_REPO_NAME = "August_2nd10WeeksofCloudOps-main"
                 GIT_USER_NAME = "ajaypatil1503"
@@ -95,13 +109,13 @@ pipeline {
                         sh '''
                             git config user.email "ajayspatil1503@gmail.com"
                             git config user.name "ajaypatil1503"
-                            BUILD_NUMBER=${BUILD_NUMBER}
-                            echo $BUILD_NUMBER
-                            sed -i "s#image:.*#image: $REPOSITORY_URI$AWS_ECR_REPO_NAME:$BUILD_NUMBER#g" frontend-deploy-service.yaml
+                            
+                            echo "Updating image tag in deployment file..."
+                            sed -i "s#image:.*#image: ${REPOSITORY_URI}/${AWS_ECR_REPO_NAME}:${BUILD_NUMBER}#g" frontend-deploy-service.yaml
+                            
                             git add .
-                            git commit -m "Update deployment Image to version \${BUILD_NUMBER}"
+                            git commit -m "Update deployment image to version ${BUILD_NUMBER}"
                             git push https://${git_token}@github.com/${GIT_USER_NAME}/${GIT_REPO_NAME} HEAD:main
-        
                         '''
                     }
                 }
